@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+  OPERATOR
+}
+
+enum ChargerStatus {
+  AVAILABLE
+  OCCUPIED
+  FAULTED
+  OFFLINE
+  RESERVED
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum TxnType {
+  TOP_UP
+  CHARGE
+  REFUND
+  VOUCHER_REDEMPTION
+}
+
+enum MessageType {
+  NOTIFICATION
+  TRANSACTION
+  VOUCHER
+  SUPPORT
+}
+
+model User {
+  id              String        @id @default(uuid())
+  email           String        @unique
+  phone           String?
+  name            String
+  passwordHash    String
+  role            Role          @default(USER)
+  createdAt       DateTime      @default(now())
+  wallet          Wallet?
+  createdTopUps   TopUp[]       @relation("TopUpCreatedBy")
+  vehicles        Vehicle[]
+  transactions    Transaction[]
+  messages        Message[]
+}
+
+model Wallet {
+  id              String        @id @default(uuid())
+  userId          String        @unique
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balancePeso     Decimal       @default(0.00) @db.Decimal(10, 2)
+  topUps          TopUp[]
+}
+
+model TopUp {
+  id              String        @id @default(uuid())
+  walletId        String
+  wallet          Wallet        @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amountPeso      Decimal       @db.Decimal(10, 2)
+  note            String?
+  createdAt       DateTime      @default(now())
+  createdBy       String
+  createdByUser   User          @relation("TopUpCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+}
+
+model Vehicle {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  catalogId        String?
+  catalog          VehicleCatalog? @relation(fields: [catalogId], references: [id], onDelete: SetNull)
+  make            String
+  model           String
+  year            Int
+  plateNumber     String?
+  connectorType   String
+}
+
+model VehicleCatalog {
+  id            String   @id @default(uuid())
+  make          String
+  model         String
+  year          Int
+  connectorType String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  vehicles       Vehicle[]
+
+  @@index([make])
+  @@index([model])
+  @@index([isActive])
+  @@unique([make, model, year, connectorType])
+}
+
+model Station {
+  id              String        @id @default(uuid())
+  name            String
+  address         String
+  city            String
+  latitude        Decimal       @db.Decimal(10, 8)
+  longitude       Decimal       @db.Decimal(11, 8)
+  isActive        Boolean       @default(true)
+  openHours       String?
+  photos          String[]      @default([])
+  chargers        Charger[]
+  createdAt       DateTime      @default(now())
+}
+
+model Charger {
+  id              String        @id @default(uuid())
+  stationId       String
+  station         Station       @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  ocppId          String        @unique
+  name            String
+  connectorType   String
+  powerOutputKw   Decimal       @db.Decimal(10, 2)
+  pricePerKwh     Decimal       @db.Decimal(10, 2)
+  status          ChargerStatus @default(AVAILABLE)
+  lastHeartbeat   DateTime?
+  sessions        ChargingSession[]
+}
+
+model ChargingSession {
+  id              String        @id @default(uuid())
+  chargerId       String
+  charger         Charger       @relation(fields: [chargerId], references: [id], onDelete: Cascade)
+  userId          String
+  startTime       DateTime
+  endTime         DateTime?
+  meterStartWh    Int?
+  meterStopWh     Int?
+  energyKwh       Decimal       @default(0) @db.Decimal(10, 2)
+  costPeso        Decimal       @default(0) @db.Decimal(10, 2)
+  status          SessionStatus @default(ACTIVE)
+  ocppTransactionId Int?
+}
+
+model Transaction {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            TxnType
+  amountPeso      Decimal       @db.Decimal(10, 2)
+  description     String
+  referenceId     String?
+  createdAt       DateTime      @default(now())
+}
+
+model Voucher {
+  id              String        @id @default(uuid())
+  code            String        @unique
+  discountPeso    Decimal?      @db.Decimal(10, 2)
+  discountPercent Decimal?      @db.Decimal(5, 2)
+  maxUses         Int           @default(1)
+  usedCount       Int           @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean       @default(true)
+  redemptions     VoucherRedemption[]
+  createdAt       DateTime      @default(now())
+}
+
+model VoucherRedemption {
+  id              String        @id @default(uuid())
+  voucherId       String
+  voucher         Voucher       @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  userId          String
+  redeemedAt      DateTime      @default(now())
+}
+
+model Message {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy       String?
+  batchId         String?
+  title           String
+  body            String
+  type            MessageType
+  isRead          Boolean       @default(false)
+  referenceId     String?
+  createdAt       DateTime      @default(now())
+
+  @@index([createdBy])
+  @@index([batchId])
+}
+
+model OcppLog {
+  id        String   @id @default(uuid())
+  ocppId    String
+  sessionId String?
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([ocppId])
+  @@index([sessionId])
+  @@index([createdAt])
+}

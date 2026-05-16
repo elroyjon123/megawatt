@@ -1,0 +1,2 @@
+-- AddForeignKey
+ALTER TABLE "TopUp" ADD CONSTRAINT "TopUp_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -1,0 +1,40 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "EV Charging Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node prisma/migrateAndStart.js",
+    "dev": "nodemon server.js",
+    "seed": "node prisma/seed.js",
+    "seed:small": "SEED_SCALE=small node prisma/seed.js",
+    "seed:medium": "SEED_SCALE=medium node prisma/seed.js",
+    "seed:large": "SEED_SCALE=large node prisma/seed.js",
+    "seed:wipe": "node prisma/seed.js --wipe",
+    "seed:wipe:small": "SEED_SCALE=small node prisma/seed.js --wipe",
+    "seed:wipe:medium": "SEED_SCALE=medium node prisma/seed.js --wipe",
+    "seed:wipe:large": "SEED_SCALE=large node prisma/seed.js --wipe"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "google-auth-library": "^10.6.2",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "pg": "^8.20.0",
+    "prisma": "^7.8.0",
+    "socket.io": "^4.8.3",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
