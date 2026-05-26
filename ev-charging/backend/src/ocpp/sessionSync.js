@@ -127,10 +127,10 @@ async function handleStartTransaction({ prisma, io, logger = console }, evt) {
 /**
  * Update energy based on latest meter reading.
  *
- * @param {{ prisma: import('@prisma/client').PrismaClient }} deps
+ * @param {{ prisma: import('@prisma/client').PrismaClient, io?: any }} deps
  * @param {{ ocppId: string, ocppTransactionId?: number, meterWh?: number, timestamp?: string|Date }} evt
  */
-async function handleMeterValues({ prisma }, evt) {
+async function handleMeterValues({ prisma, io }, evt) {
   const ocppId = evt?.ocppId;
   if (!ocppId) return;
   const charger = await prisma.charger.findUnique({ where: { ocppId } });
@@ -151,11 +151,15 @@ async function handleMeterValues({ prisma }, evt) {
   const deltaWh = meterStartWh != null ? Math.max(0, meterWh - meterStartWh) : null;
   const energyKwh = deltaWh != null ? deltaWh / 1000 : null;
 
+  // Calculate cost
+  const costPeso = energyKwh != null ? energyKwh * charger.pricePerKwh : null;
+
   await prisma.chargingSession.update({
     where: { id: session.id },
     data: {
       meterStopWh: meterWh,
       ...(energyKwh != null ? { energyKwh } : {}),
+      ...(costPeso != null ? { costPeso } : {}),
     },
   });
 
@@ -168,17 +172,29 @@ async function handleMeterValues({ prisma }, evt) {
       payload: evt,
     },
   });
+
+  // ✅ Emit real-time power data to frontend
+  if (io && energyKwh != null) {
+    // Calculate instantaneous power from energy delta
+    // Assuming MeterValues come every ~10-30 seconds
+    const powerKw = charger.powerOutputKw; // Use charger's rated power
+    
+    io.to("cpo").emit("session_progress", {
+      sessionId: session.id,
+      chargerId: charger.id,
+      ocppId: charger.ocppId,
+      energyDelivered: energyKwh,
+      powerKw: powerKw,
+      totalCost: costPeso || 0,
+    });
+  }
 }
 
 /**
- * Stop a session and create wallet debit + CHARGE transaction.
- *
- * Idempotent: if a CHARGE transaction already exists for this session, we do not charge again.
- *
- * @param {{ prisma: import('@prisma/client').PrismaClient, logger?: Console }} deps
+ * @param {{ prisma: import('@prisma/client').PrismaClient, io: import('socket.io').Server, logger?: Console }} deps
  * @param {{ ocppId: string, ocppTransactionId?: number, stoppedAt?: string|Date, meterStopWh?: number }} evt
  */
-async function handleStopTransaction({ prisma, logger = console }, evt) {
+async function handleStopTransaction({ prisma, io, logger = console }, evt) {
   const ocppId = evt?.ocppId;
   if (!ocppId) return;
   const charger = await prisma.charger.findUnique({ where: { ocppId } });
@@ -194,6 +210,25 @@ async function handleStopTransaction({ prisma, logger = console }, evt) {
       status: "ACTIVE",
     },
   });
+  
+  // ✅ SAFETY: If no active session found but charger is OCCUPIED, reset to AVAILABLE
+  if (!session && charger.status === "OCCUPIED") {
+    logger.warn(`[OCPP] StopTransaction for ${ocppId} but no active session found. Resetting to AVAILABLE.`);
+    await prisma.charger.update({
+      where: { id: charger.id },
+      data: { status: "AVAILABLE" },
+    });
+    
+    if (io) {
+      io.emit("charger:status", {
+        chargerId: charger.id,
+        ocppId: charger.ocppId,
+        status: "AVAILABLE",
+      });
+    }
+    return;
+  }
+  
   if (!session) return;
 
   const stoppedAt = evt.stoppedAt ? new Date(evt.stoppedAt) : new Date();
@@ -228,6 +263,13 @@ async function handleStopTransaction({ prisma, logger = console }, evt) {
           costPeso,
         },
       });
+      
+      // ✅ Update charger status to AVAILABLE
+      await tx.charger.update({
+        where: { id: charger.id },
+        data: { status: "AVAILABLE" },
+      });
+      
       return { skipped: true, transactionId: existingCharge.id };
     }
 
@@ -253,6 +295,13 @@ async function handleStopTransaction({ prisma, logger = console }, evt) {
           costPeso,
         },
       });
+      
+      // ✅ Update charger status to AVAILABLE even if insufficient funds
+      await tx.charger.update({
+        where: { id: charger.id },
+        data: { status: "AVAILABLE" },
+      });
+      
       return { skipped: true, insufficientFunds: true };
     }
 
@@ -292,6 +341,12 @@ async function handleStopTransaction({ prisma, logger = console }, evt) {
       },
     });
 
+    // ✅ Update charger status to AVAILABLE
+    await tx.charger.update({
+      where: { id: charger.id },
+      data: { status: "AVAILABLE" },
+    });
+
     return { skipped: false, transactionId: txn.id, walletBalance: updatedWallet.balancePeso };
   });
 
@@ -304,6 +359,15 @@ async function handleStopTransaction({ prisma, logger = console }, evt) {
       payload: evt,
     },
   });
+
+  // ✅ Emit charger status update via Socket.IO
+  if (io) {
+    io.emit("charger:status", {
+      chargerId: charger.id,
+      ocppId: charger.ocppId,
+      status: "AVAILABLE",
+    });
+  }
 
   return result;
 }

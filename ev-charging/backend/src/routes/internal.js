@@ -227,11 +227,24 @@ router.post("/charger/status", async (req, res) => {
 router.post("/session/start", async (req, res) => {
   try {
     const ocppId = req.body?.ocppId || req.body?.chargePointId;
-    const userId = req.body?.userId;
+    let userId = req.body?.userId;
     const transactionId = req.body?.transactionId;
     if (!ocppId) return res.status(400).json({ error: "ocppId (or chargePointId) is required" });
-    if (!userId) return res.status(400).json({ error: "userId is required" });
     if (transactionId == null) return res.status(400).json({ error: "transactionId is required" });
+    
+    // If no userId provided (admin-initiated), use admin user
+    if (!userId) {
+      const adminUser = await prisma.user.findFirst({ 
+        where: { role: "ADMIN" },
+        orderBy: { createdAt: "asc" }
+      });
+      if (adminUser) {
+        userId = adminUser.id;
+        console.log(`[OCPP] No userId provided, using admin user: ${adminUser.email}`);
+      } else {
+        return res.status(400).json({ error: "userId is required and no admin user found" });
+      }
+    }
 
     const io = req.app.get("io");
     const meterStartWh =
@@ -252,6 +265,24 @@ router.post("/session/start", async (req, res) => {
           startedAt: req.body?.timestamp,
         }
       );
+
+      // ✅ Set charger status to OCCUPIED when session starts
+      if (session) {
+        const charger = await prisma.charger.findUnique({ where: { ocppId } });
+        if (charger) {
+          await prisma.charger.update({
+            where: { id: charger.id },
+            data: { status: "OCCUPIED" },
+          });
+          
+          // Emit status update
+          io.emit("charger:status", {
+            chargerId: charger.id,
+            ocppId: charger.ocppId,
+            status: "OCCUPIED",
+          });
+        }
+      }
 
       return res.json({ ok: true, sessionId: session?.id || null });
     } catch (err) {
@@ -287,7 +318,8 @@ router.post("/session/meter", async (req, res) => {
           : extractMeterWh(req.body);
 
     try {
-      await handleMeterValues({ prisma }, {
+      const io = req.app.get("io");
+      await handleMeterValues({ prisma, io }, {
         ocppId,
         ocppTransactionId: Number(transactionId),
         meterWh: Number.isFinite(meterWh) ? meterWh : undefined,
@@ -333,7 +365,7 @@ router.post("/session/stop", async (req, res) => {
 
     try {
       const result = await handleStopTransaction(
-        { prisma },
+        { prisma, io },
         {
           ocppId,
           ocppTransactionId: Number(transactionId),

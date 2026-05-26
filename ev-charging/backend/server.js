@@ -141,6 +141,12 @@ app.use("/api/vehicle-catalog", require("./src/routes/vehicleCatalog.js"));
 // Internal hooks (called by external OCPP server)
 app.use("/api/internal", require("./src/routes/internal.js"));
 
+// Maya payment gateway
+app.use("/api/maya", require("./src/routes/maya.js"));
+
+// Webhooks (external services)
+app.use("/api/webhooks", require("./src/routes/webhooks.js"));
+
 // External OCPP server admin proxy
 app.use("/api/admin/ocpp-server", require("./src/routes/admin/ocppServerProxy.js"));
 app.use("/api/admin/ocpp-logs", require("./src/routes/admin/ocppLogs.js"));
